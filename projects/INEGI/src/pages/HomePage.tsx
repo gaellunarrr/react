@@ -21,7 +21,7 @@ export default function HomePage({
           <span className="text-xl text-white">FE</span>
         </button>
       </div>
-
+    
       {/* Pie */}
       <div className="mt-12 text-center text-gray-700">
         <button
@@ -37,6 +37,7 @@ export default function HomePage({
         <a href="https://www.inegi.org.mx/app/spc/guias.aspx" target="_blank" rel="noopener noreferrer" className="mt-2 inline-block underline hover:text-black transition-colors">
           https://www.inegi.org.mx/app/spc/guias.aspx
         </a>
+        
       </div>
     </main>
   );
