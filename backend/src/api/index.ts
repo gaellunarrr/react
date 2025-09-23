@@ -20,13 +20,10 @@ apiRouter.use('/catalog', catalogRouter);
 apiRouter.use('/plazas', plazasRouter);
 apiRouter.use('/links', linksRouter);
 
-apiRouter.use("/links", linksRouter)
+// Prefill (montado después para evitar colisiones con rutas específicas)
+apiRouter.use('/exams', prefillRouter);
 
 apiRouter.use('/exams', examsRouter);
-
-// Prefill primero
-apiRouter.use('/exams', prefillRouter);
-// Exams
 
 // Consents
 apiRouter.use('/consents', consentsRouter);

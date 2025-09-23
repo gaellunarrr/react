@@ -5,6 +5,7 @@ const LinkSchema = new Schema({
   status: { type: String, enum: ["ISSUED","USED","EXPIRED","REVOKED"], default: "ISSUED", index: true },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, required: true, index: true },
+  usedAt: { type: Date },
   // vinculación
   convocatoriaId: { type: Types.ObjectId, ref: "Convocatoria", required: true },
   concursoId:     { type: Types.ObjectId, ref: "Concurso", required: true },
