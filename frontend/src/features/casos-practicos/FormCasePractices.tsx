@@ -53,17 +53,27 @@ const emptyCase = (header?: Encabezado): CasoPractico => ({
   aspectos: [{ descripcion: "", puntaje: 0 }], // 1 aspecto inicial
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const toStringOrEmpty = (value: unknown) =>
+  typeof value === "string" ? value : value == null ? "" : String(value);
+
+const toNumberOrZero = (value: unknown) =>
+  typeof value === "number" ? value : Number.isFinite(Number(value)) ? Number(value) : 0;
+
 /** Migración desde el esquema viejo (una sola hoja) si existiera en localStorage */
-function migrateIfNeeded(raw: any): EstructuraPayload | null {
-  if (!raw) return null;
+function migrateIfNeeded(raw: unknown): EstructuraPayload | null {
+  if (!isRecord(raw)) return null;
   // Si ya tiene casos, asumimos v2
   if (Array.isArray(raw.casos)) {
-    const c1 = raw.casos[0]?.encabezado;
+    const cases = raw.casos as Array<Record<string, unknown>>;
+    const firstCaseHeader = cases[0]?.encabezado;
     // espejo raíz con encabezado del caso 1
-    if (c1) {
+    if (isRecord(firstCaseHeader)) {
       return {
-        ...c1,
-        casos: raw.casos,
+        ...(firstCaseHeader as Encabezado),
+        casos: raw.casos as CasoPractico[],
       };
     }
     return null;
@@ -74,27 +84,29 @@ function migrateIfNeeded(raw: any): EstructuraPayload | null {
     "duracionMin","nombreEspecialista","puestoEspecialista","fechaElaboracion",
     "temasGuia","planteamiento","equipoAdicional","aspectos"
   ];
-  const looksLikeV1 = keys.every((k) => k in raw);
+  const looksLikeV1 = keys.every((k) => Object.prototype.hasOwnProperty.call(raw, k));
   if (!looksLikeV1) return null;
 
   const header: Encabezado = {
-    convocatoria: raw.convocatoria ?? "",
-    unidadAdministrativa: raw.unidadAdministrativa ?? "",
-    concurso: raw.concurso ?? "",
-    puesto: raw.puesto ?? "",
-    codigoPuesto: raw.codigoPuesto ?? "",
-    modalidad: raw.modalidad ?? "",
-    duracionMin: raw.duracionMin ?? 0,
-    nombreEspecialista: raw.nombreEspecialista ?? "",
-    puestoEspecialista: raw.puestoEspecialista ?? "",
-    fechaElaboracion: raw.fechaElaboracion ?? "",
+    convocatoria: toStringOrEmpty(raw.convocatoria),
+    unidadAdministrativa: toStringOrEmpty(raw.unidadAdministrativa),
+    concurso: toStringOrEmpty(raw.concurso),
+    puesto: toStringOrEmpty(raw.puesto),
+    codigoPuesto: toStringOrEmpty(raw.codigoPuesto),
+    modalidad: toStringOrEmpty(raw.modalidad),
+    duracionMin: toNumberOrZero(raw.duracionMin),
+    nombreEspecialista: toStringOrEmpty(raw.nombreEspecialista),
+    puestoEspecialista: toStringOrEmpty(raw.puestoEspecialista),
+    fechaElaboracion: toStringOrEmpty(raw.fechaElaboracion),
   };
   const case1: CasoPractico = {
     encabezado: header,
-    temasGuia: raw.temasGuia ?? "",
-    planteamiento: raw.planteamiento ?? "",
-    equipoAdicional: raw.equipoAdicional ?? "",
-    aspectos: Array.isArray(raw.aspectos) ? raw.aspectos : [{ descripcion: "", puntaje: 0 }],
+    temasGuia: toStringOrEmpty(raw.temasGuia),
+    planteamiento: toStringOrEmpty(raw.planteamiento),
+    equipoAdicional: toStringOrEmpty(raw.equipoAdicional),
+    aspectos: Array.isArray(raw.aspectos)
+      ? (raw.aspectos as Array<{ descripcion: string; puntaje: number }>)
+      : [{ descripcion: "", puntaje: 0 }],
   };
   return { ...header, casos: [case1] };
 }
@@ -114,7 +126,9 @@ export default function FormCasePractices({
         const migrated = migrateIfNeeded(parsed);
         if (migrated) return migrated;
       }
-    } catch {}
+    } catch {
+      /* ignore corrupted localStorage values */
+    }
     const first = emptyCase();
     return { ...first.encabezado, casos: [first] };
   });
