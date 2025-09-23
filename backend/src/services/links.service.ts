@@ -1,124 +1,185 @@
+import Convocatoria from '../models/Convocatoria';
+import Concurso from '../models/Concurso';
+import Especialista from '../models/Especialista';
 import Link from '../models/Link';
 import Plaza from '../models/Plaza';
-import Especialista from '../models/Especialista';
 import { config } from '../shared/config';
-import { generateTokenHex, sha256Hex } from '../shared/token';
-import { notFound, AppError } from '../shared/errors';
+import { AppError, notFound } from '../shared/errors';
 import { log } from '../shared/logger';
+import { generateTokenHex } from '../shared/token';
 
 type Header = {
-  puesto: string;
-  codigoPlaza: string;
-  unidadAdministrativa: string;
-  folio: string;
-  fechaAplicacion: string; // YYYY-MM-DD
-  horaAplicacion: string;  // HH:mm
-  especialistaId: string;
+  convocatoria: any;
+  concurso: any;
+  plaza: {
+    id: string;
+    codigoPlaza: string;
+    puesto: string;
+    unidadAdministrativa: string;
+    folio?: string;
+    fechaAplicacion?: string;
+    horaAplicacion?: string;
+  };
+  especialista: {
+    id: string;
+    nombre: string;
+    email?: string;
+  };
 };
 
-export async function createLink(plazaId: string, ttlHours?: number) {
-  const ttl = Math.min(Math.max(Number(ttlHours || config.linkTtlHours), 1), 720);
-  const token = generateTokenHex(); // 48 hex
-  const tokenHash = sha256Hex(token);
-  const expiraAt = new Date(Date.now() + ttl * 60 * 60 * 1000);
+type LinkState = 'ok' | 'invalid' | 'expired' | 'used' | 'revoked';
 
-  // validar plaza existente
-  const plaza = await Plaza.findById(plazaId);
-  if (!plaza) throw notFound('Plaza not found');
+const FRONT_BASE = config.publicBaseUrl.replace(/\/$/, '');
 
-  const created = await Link.create({ plazaId, tokenHash, expiraAt, usado: false });
+function toDate(value: any): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const asDate = new Date(value);
+  return Number.isNaN(asDate.getTime()) ? null : asDate;
+}
 
-  const url = `${config.publicBaseUrl}/examen?token=${token}`;
+function classifyState(link: any): { code: LinkState; status: number } {
+  if (!link) return { code: 'invalid', status: 404 };
 
-  log.info('link.create', { linkId: created._id.toString(), plazaId, expiraAt: expiraAt.toISOString() });
+  const expiresAt = toDate(link.expiresAt);
+  if (expiresAt && expiresAt.getTime() <= Date.now()) {
+    return { code: 'expired', status: 400 };
+  }
 
+  const status = String(link.status || 'ISSUED').toUpperCase();
+  if (status === 'ISSUED') return { code: 'ok', status: 200 };
+  if (status === 'USED') return { code: 'used', status: 400 };
+  if (status === 'REVOKED') return { code: 'revoked', status: 400 };
+  if (status === 'EXPIRED') return { code: 'expired', status: 400 };
+  return { code: 'invalid', status: 400 };
+}
+
+function buildHeader(
+  plaza: any,
+  conv: any,
+  conc: any,
+  esp: any
+): Header {
   return {
-    linkId: created._id.toString(),
-    url,
-    token,
-    expiraAt: expiraAt.toISOString()
+    convocatoria: {
+      id: String(conv?._id ?? plaza.convocatoriaId ?? ''),
+      codigo: conv?.codigo ?? conv?.nombre ?? '',
+    },
+    concurso: {
+      id: String(conc?._id ?? plaza.concursoId ?? ''),
+      nombre: conc?.nombre ?? conc?.codigo ?? '',
+    },
+    plaza: {
+      id: String(plaza._id),
+      codigoPlaza: plaza.codigoPlaza ?? '',
+      puesto: plaza.puesto ?? '',
+      unidadAdministrativa: plaza.unidadAdministrativa ?? '',
+      folio: plaza.folio ?? '',
+      fechaAplicacion: plaza.fechaAplicacion ?? '',
+      horaAplicacion: plaza.horaAplicacion ?? '',
+    },
+    especialista: {
+      id: String(esp?._id ?? plaza.especialistaId ?? ''),
+      nombre: esp?.nombreCompleto ?? '',
+      email: esp?.email ?? '',
+    },
   };
 }
 
-export async function findByTokenHash(tokenHash: string) {
-  return Link.findOne({ tokenHash });
+export async function createLink(plazaId: string, ttlHours?: number) {
+  const plaza = await Plaza.findById(plazaId).lean();
+  if (!plaza) throw notFound('Plaza not found');
+
+  const [conv, conc, esp] = await Promise.all([
+    Convocatoria.findById(plaza.convocatoriaId).lean(),
+    Concurso.findById(plaza.concursoId).lean(),
+    Especialista.findById(plaza.especialistaId).lean(),
+  ]);
+
+  const ttl = Math.min(Math.max(Number(ttlHours ?? config.linkTtlHours), 1), 720);
+  const token = generateTokenHex();
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + ttl * 60 * 60 * 1000);
+
+  const header = buildHeader(plaza, conv, conc, esp);
+
+  const link = await Link.create({
+    token,
+    status: 'ISSUED',
+    createdAt,
+    expiresAt,
+    convocatoriaId: plaza.convocatoriaId,
+    concursoId: plaza.concursoId,
+    plazaId: plaza._id,
+    especialistaId: plaza.especialistaId,
+    header,
+  });
+
+  const url = `${FRONT_BASE}/form/${token}`;
+
+  log.info('link.create', {
+    linkId: String(link._id),
+    plazaId: String(plaza._id),
+    expiresAt: expiresAt.toISOString(),
+  });
+
+  return {
+    linkId: String(link._id),
+    token,
+    url,
+    expiresAt: expiresAt.toISOString(),
+    header,
+  };
 }
 
-function classifyState(link: any) {
-  if (!link) return { code: 'invalid' as const, status: 404 };
-  if (link.usado) return { code: 'used' as const, status: 400 };
-  if (link.expiraAt.getTime() <= Date.now()) return { code: 'expired' as const, status: 400 };
-  return { code: 'ok' as const, status: 200 };
+export async function findByToken(token: string) {
+  return Link.findOne({ token });
 }
 
-export async function verifyToken(tokenHex: string) {
-  const tokenHash = sha256Hex(tokenHex);
-  const link = await findByTokenHash(tokenHash);
+export async function verifyToken(token: string) {
+  const link = await findByToken(token);
   const state = classifyState(link);
   if (state.code !== 'ok') {
     throw new AppError(state.code, state.status, state.code);
   }
-  // cargar header de plaza sin marcar uso
-  const plaza = await Plaza.findById(link!.plazaId);
-  if (!plaza) throw notFound('Plaza not found');
-
-  const header: Header = {
-    puesto: plaza.puesto,
-    codigoPlaza: plaza.codigoPlaza,
-    unidadAdministrativa: plaza.unidadAdministrativa,
-    folio: plaza.folio,
-    fechaAplicacion: plaza.fechaAplicacion,
-    horaAplicacion: plaza.horaAplicacion,
-    especialistaId: String(plaza.especialistaId)
+  return {
+    linkId: String(link!._id),
+    plazaId: String(link!.plazaId),
+    header: link!.header ?? null,
   };
-  return header;
 }
 
-export async function markTokenUsed(tokenHex: string) {
-  const tokenHash = sha256Hex(tokenHex);
-
+export async function markTokenUsed(token: string) {
+  const now = new Date();
   const updated = await Link.findOneAndUpdate(
-    { tokenHash, usado: false, expiraAt: { $gt: new Date() } },
-    { $set: { usado: true, usadoAt: new Date() } },
+    { token, status: 'ISSUED', expiresAt: { $gt: now } },
+    { $set: { status: 'USED', usedAt: now }, $inc: { submissionsCount: 1 } },
     { new: true }
   );
 
   if (updated) {
-    log.info('link.used', { linkId: updated._id.toString(), usedAt: updated.usadoAt?.toISOString() });
-    return { ok: true, usedAt: updated.usadoAt?.toISOString() };
+    log.info('link.used', {
+      linkId: String(updated._id),
+      usedAt: updated.usedAt ? updated.usedAt.toISOString() : undefined,
+    });
+    return updated;
   }
 
-  const link = await findByTokenHash(tokenHash);
+  const link = await findByToken(token);
   const state = classifyState(link);
   throw new AppError(state.code, state.status, state.code);
 }
 
-
-export async function prefillByToken(tokenHex: string) {
-  const tokenHash = sha256Hex(tokenHex);
-  const link = await findByTokenHash(tokenHash);
+export async function prefillByToken(token: string) {
+  const link = await findByToken(token);
   const state = classifyState(link);
   if (state.code !== 'ok') {
     throw new AppError(state.code, state.status, state.code);
   }
 
-  const plaza = await Plaza.findById(link!.plazaId);
-  if (!plaza) throw notFound('Plaza not found');
-
-  const esp = await Especialista.findById(plaza.especialistaId);
-  const especialistaNombre = esp?.nombreCompleto || '';
-
   return {
-    plazaId: String(plaza._id),
-    header: {
-      puesto: plaza.puesto,
-      codigoPlaza: plaza.codigoPlaza,
-      unidadAdministrativa: plaza.unidadAdministrativa,
-      folio: plaza.folio,
-      fechaAplicacion: plaza.fechaAplicacion,
-      horaAplicacion: plaza.horaAplicacion,
-      especialistaId: String(plaza.especialistaId),
-      especialistaNombre
-    }
+    linkId: String(link!._id),
+    plazaId: String(link!.plazaId),
+    header: link!.header ?? null,
   };
 }

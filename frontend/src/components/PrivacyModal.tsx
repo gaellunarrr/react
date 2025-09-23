@@ -32,7 +32,11 @@ export default function PrivacyModal({
     if (!portalEl || typeof document === "undefined") return;
     document.body.appendChild(portalEl);
     return () => {
-      try { document.body.removeChild(portalEl); } catch {}
+      try {
+        document.body.removeChild(portalEl);
+      } catch {
+        /* ignore portal cleanup errors */
+      }
     };
   }, [portalEl]);
 

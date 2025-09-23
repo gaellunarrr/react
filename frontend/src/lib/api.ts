@@ -25,11 +25,34 @@ export type CreateLinkBody = {
   ttlHours?: number; // default 48
 };
 
+export type ExamHeader = {
+  convocatoria?: { id?: string; codigo?: string } | string;
+  concurso?: { id?: string; nombre?: string } | string;
+  plaza?: {
+    id?: string;
+    codigoPlaza?: string;
+    puesto?: string;
+    unidadAdministrativa?: string;
+    folio?: string;
+    fechaAplicacion?: string;
+    horaAplicacion?: string;
+    [key: string]: unknown;
+  } | null;
+  especialista?: {
+    id?: string;
+    nombre?: string;
+    nombreCompleto?: string;
+    email?: string;
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+};
+
 export type GenResult = {
   token: string;
   url: string;
   expiresAt: string;
-  header?: unknown;
+  header?: ExamHeader | null;
 };
 
 export type LinkVerify = {
@@ -37,29 +60,59 @@ export type LinkVerify = {
   reason?: "invalid" | "expired" | "used" | "revoked" | string;
   status?: string;
   expiresAt?: string;
-  header?: any;
+  header?: ExamHeader | null;
 };
 
 export type PrefillPayload = {
-  header: any;
+  header: ExamHeader | null;
   fields?: Array<{
     name: string;
     label: string;
     type?: "text" | "number" | "select" | "date" | "textarea";
     required?: boolean;
     options?: Array<{ value: string; label: string }>;
-    defaultValue?: any;
+    defaultValue?: unknown;
   }>;
+};
+
+export type SubmitExamPayload = {
+  header: ExamHeader | null;
+  answers: Record<string, unknown>;
+  nombreDeclarante?: string;
 };
 
 export type SubmitExamResponse = { examId: string; status: "submitted" | string };
 export type Artifacts = { faPdfUrl?: string; fePdfUrl?: string; receiptPdfUrl?: string };
 
+export type ExamSummary = {
+  _id: string;
+  linkToken?: string;
+  convocatoriaId: string;
+  concursoId: string;
+  plazaId: string;
+  especialistaId: string;
+  nombreDeclarante?: string;
+  createdAt?: string;
+  header?: ExamHeader | null;
+  artifacts?: Artifacts;
+};
+
+export type ExamDetail = ExamSummary & { answers: Record<string, unknown> };
+
 // ===== Infra HTTP =====
-const BASE =
-  (import.meta as any)?.env?.VITE_API_URL ??
-  (typeof process !== "undefined" ? (process as any).env?.NEXT_PUBLIC_API_URL : undefined) ??
-  "/api";
+const metaEnv =
+  (typeof import.meta !== "undefined"
+    ? (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+    : undefined) ?? {};
+const nodeEnv =
+  (typeof process !== "undefined"
+    ? (process as unknown as { env?: Record<string, string | undefined> }).env
+    : undefined) ?? {};
+
+const BASE = metaEnv.VITE_API_URL ?? nodeEnv.NEXT_PUBLIC_API_URL ?? "/api";
+
+type ErrorPayload = { message?: string; code?: string };
+type ErrorWithCode = Error & { code?: string };
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -67,11 +120,12 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     // credentials: "include",
   });
-  const payload = await res.json().catch(() => ({}));
+  const payload = (await res.json().catch(() => ({}))) as unknown;
   if (!res.ok) {
-    const e = new Error((payload as any)?.message || "Error de red");
-    (e as any).code = (payload as any)?.code || "http_error";
-    throw e;
+    const data = payload as ErrorPayload;
+    const error: ErrorWithCode = new Error(data?.message || "Error de red");
+    error.code = data?.code || "http_error";
+    throw error;
   }
   return payload as T;
 }
@@ -92,14 +146,22 @@ export const api = {
   // Exams
   prefillExam: (token: string) =>
     http<PrefillPayload>(`/exams/prefill/${encodeURIComponent(token)}`),
-  submitExam: (token: string, body: { header: any; answers: Record<string, any> }) =>
+  submitExam: (token: string, body: SubmitExamPayload) =>
     http<SubmitExamResponse>(`/exams/${encodeURIComponent(token)}`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  getExam: (id: string) => http<unknown>(`/exams/${encodeURIComponent(id)}`),
+  listExams: (params: { convocatoriaId?: string; concursoId?: string; plazaId?: string } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.convocatoriaId) qs.set("convocatoriaId", params.convocatoriaId);
+    if (params.concursoId) qs.set("concursoId", params.concursoId);
+    if (params.plazaId) qs.set("plazaId", params.plazaId);
+    const query = qs.toString();
+    return http<ExamSummary[]>(`/exams${query ? `?${query}` : ""}`);
+  },
+  getExam: (id: string) => http<ExamDetail>(`/exams/by-id/${encodeURIComponent(id)}`),
   getArtifacts: (id: string) =>
-    http<Artifacts>(`/exams/${encodeURIComponent(id)}/artifacts`),
+    http<Artifacts>(`/exams/by-id/${encodeURIComponent(id)}/artifacts`),
 
   // Consents
   postConsent: (
