@@ -3,18 +3,24 @@ import { api } from "../../lib/api";
 
 type Convocatoria = { _id: string; codigo: string; activa: boolean };
 type Concurso = { _id: string; convocatoriaId: string; nombre: string; activo?: boolean };
+
 type Plaza = {
-  _id: string;
-  convocatoriaId: string;
-  concursoId: string;
+  _id: string; // id interno de la plaza (puede ser ObjectId o hash)
+  convocatoriaId: string; // proviene del backend para referencia/visualización
+  concursoId: string;     // proviene del backend para referencia/visualización
+  // --- PUESTO DE LA PLAZA (vacante) ---
   puesto: string;
+  // código de la plaza (lo usaremos para generar el link y que el backend la resuelva por código)
   codigoPlaza: string;
+  // unidad administrativa de la plaza
   unidadAdministrativa: string;
   folio?: string;
   fechaAplicacion?: string;
   horaAplicacion?: string;
+  // referencia al especialista/jefe asignado a la plaza
   especialistaId: string;
 };
+
 type Especialista = { _id: string; nombreCompleto: string; email?: string };
 
 type GenResult = { token: string; url: string; expiresAt: string };
@@ -87,17 +93,31 @@ export default function LinkGenerator() {
     setBusy(true);
     setBusyRow(plaza._id);
     try {
+      // Importante:
+      // - Enviamos los _id reales seleccionados en los combos (convId/concId)
+      // - Enviamos la plaza por su CODIGO (codigoPlaza) para que el backend la resuelva aunque el _id no sea ObjectId
       const body = {
-        convocatoriaId: plaza.convocatoriaId,
-        concursoId: plaza.concursoId,
-        plazaId: plaza._id,
-        especialistaId: plaza.especialistaId,
+        convocatoriaId: convId,                // _id real de la convocatoria (select)
+        concursoId: concId,                    // _id real del concurso (select)
+        plazaId: plaza.codigoPlaza,            // usar código de plaza para resolución robusta en el backend
+        especialistaId: plaza.especialistaId,  // el backend podrá resolverlo; si no, mostrará 400 específico
         ttlHours: 48,
+        prefill: {
+            plazaCodigo: plaza.codigoPlaza,
+            puesto: plaza.puesto,
+            unidadAdministrativa: plaza.unidadAdministrativa,
+            jefeNombre: especialistasById[plaza.especialistaId]?.nombreCompleto || "",
+        }
       };
       const res = (await api.createLink(body)) as GenResult;
       setResults((prev) => ({ ...prev, [plaza._id]: res }));
     } catch (e: any) {
-      setError(e?.message || "No se pudo generar el link.");
+      // Intenta extraer mensaje del servidor si existe
+      const serverMsg =
+        e?.response?.data?.message ||
+        e?.data?.message ||
+        e?.message;
+      setError(serverMsg || "No se pudo generar el link.");
     } finally {
       setBusy(false);
       setBusyRow(null);
@@ -109,7 +129,7 @@ export default function LinkGenerator() {
       await navigator.clipboard.writeText(text);
       alert("¡Copiado!");
     } catch {
-      const ok = window.confirm(`Copia el link manualmente:\n${text}`);
+      const ok = ~`window.confirm(Copia el link manualmente:\n${text})`;
       if (ok) void 0;
     }
   };
@@ -178,7 +198,11 @@ export default function LinkGenerator() {
             </thead>
             <tbody>
               {plazas.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">No hay plazas para esta combinación.</td></tr>
+                <tr>
+                  <td colSpan={6} className="px-3 py-6 text-center text-gray-500">
+                    No hay plazas para esta combinación.
+                  </td>
+                </tr>
               )}
               {plazas.map((p) => {
                 const esp = especialistasById[p.especialistaId];
@@ -186,9 +210,10 @@ export default function LinkGenerator() {
                 return (
                   <tr key={p._id} className="border-t">
                     <td className="px-3 py-2 font-mono">{p.codigoPlaza}</td>
-                    <td className="px-3 py-2">{p.puesto}</td>
-                    <td className="px-3 py-2">{p.unidadAdministrativa}</td>
-                    <td className="px-3 py-2">{esp?.nombreCompleto || p.especialistaId}</td>
+                    {/* PUESTO DE LA PLAZA (vacante) */}
+                    <td className="px-3 py-2">{p.puesto || "—"}</td>
+                    <td className="px-3 py-2">{p.unidadAdministrativa || "—"}</td>
+                    <td className="px-3 py-2">{esp?.nombreCompleto || p.especialistaId || "—"}</td>
                     <td className="px-3 py-2">
                       <button
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm disabled:opacity-50"
@@ -201,8 +226,20 @@ export default function LinkGenerator() {
                     <td className="px-3 py-2">
                       {result ? (
                         <div className="flex items-center gap-2">
-                          <a className="underline text-blue-700 break-all" href={result.url} target="_blank" rel="noreferrer">{result.url}</a>
-                          <button className="text-xs px-2 py-1 border rounded" onClick={() => copy(result.url)}>Copiar</button>
+                          <a
+                            className="underline text-blue-700 break-all"
+                            href={result.url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {result.url}
+                          </a>
+                          <button
+                            className="text-xs px-2 py-1 border rounded"
+                            onClick={() => copy(result.url)}
+                          >
+                            Copiar
+                          </button>
                         </div>
                       ) : (
                         <span className="text-gray-400 text-sm">—</span>
