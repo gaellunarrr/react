@@ -5,10 +5,10 @@ import { prefillByToken } from "../../services/links.service";
 
 const router = Router();
 
-// Queda: GET /api/exams/prefill/:token
-router.get("/prefill/:token", async (req, res, next) => {
+// GET /api/exams/prefill?token=xxx
+router.get("/prefill", async (req, res, next) => {
   try {
-    const token = String(req.params.token || "");
+    const token = String(req.query.token || "");
     if (!isValidHexToken(token)) {
       return res.status(404).json({ code: "invalid_token" });
     }

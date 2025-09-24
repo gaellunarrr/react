@@ -127,23 +127,9 @@ export async function prefillByToken(tokenHex: string) {
     throw new AppError(state.code, state.status, state.code);
   }
 
-  const plaza = await Plaza.findById(link!.plazaId);
-  if (!plaza) throw notFound('Plaza not found');
-
-  const esp = await Especialista.findById(plaza.especialistaId);
-  const especialistaNombre = esp?.nombreCompleto || '';
-
+  // Devolver los datos que se guardaron al crear el link (desde links.router.ts)
   return {
-    plazaId: String(plaza._id),
-    header: {
-      puesto: plaza.puesto,
-      codigoPlaza: plaza.codigoPlaza,
-      unidadAdministrativa: plaza.unidadAdministrativa,
-      folio: plaza.folio,
-      fechaAplicacion: plaza.fechaAplicacion,
-      horaAplicacion: plaza.horaAplicacion,
-      especialistaId: String(plaza.especialistaId),
-      especialistaNombre
-    }
+    plazaId: String(link!.plazaId),
+    prefill: link!.header || {}, // Aquí están los datos: convocatoria, concurso, plazaCodigo, puesto, unidadAdministrativa, jefeNombre, etc.
   };
 }

@@ -254,6 +254,37 @@ router.get("/_debug/by-cc", async (req, res, next) => {
   } catch (e) { return next(e); }
 });
 
+/* --------------------------------- Verificar token -------------------------------- */
+
+router.get("/verify", async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = String(req.query.token || "");
+    if (!token) {
+      return res.status(400).json({ valid: false, reason: "token requerido" });
+    }
+
+    const tokenHash = crypto.createHash("sha256").update(token, "utf8").digest("hex");
+    const link = await Link.findOne({ tokenHash }).lean();
+
+    if (!link) {
+      return res.json({ valid: false, reason: "token no encontrado" });
+    }
+
+    if (link.expiraAt < new Date()) {
+      return res.json({ valid: false, reason: "token expirado" });
+    }
+
+    if (link.status !== "ISSUED") {
+      return res.json({ valid: false, reason: `token ${link.status.toLowerCase()}` });
+    }
+
+    return res.json({ valid: true });
+  } catch (err: any) {
+    console.error("[links] verify error:", err?.message);
+    return res.status(500).json({ valid: false, reason: "error interno" });
+  }
+});
+
 /* --------------------------------- Endpoint principal -------------------------------- */
 
 router.post("/", async (req: Request, res: Response, next: NextFunction) => {
