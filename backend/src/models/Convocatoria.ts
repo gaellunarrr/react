@@ -1,18 +1,23 @@
-import { Schema, model } from 'mongoose';
+import { Schema, model } from "mongoose";
 
 const ConvocatoriaSchema = new Schema(
   {
-    // p.ej. "001/2025"
-    codigo: { type: String, required: true, unique: true, trim: true },
-    activa: { type: Boolean, default: true }
+    // En tu BD es hash-40, no ObjectId
+    _id: { type: String, required: true },
+
+    // Campos frecuentes en tus colecciones
+    codigo: { type: String },
+    nombre: { type: String },
+    activa: { type: Boolean },
+    hash: { type: String },
+    convocatoria: { type: String },
+    code: { type: String },
   },
-  { timestamps: true }
+  {
+    versionKey: false,
+    strict: false, // tolera variaciones reales de la colección
+    timestamps: false,
+  }
 );
 
-export type Convocatoria = {
-  _id: string;
-  codigo: string;
-  activa: boolean;
-};
-
-export default model<Convocatoria>('Convocatoria', ConvocatoriaSchema);
+export default model("Convocatoria", ConvocatoriaSchema);

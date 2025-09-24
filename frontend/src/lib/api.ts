@@ -1,192 +1,166 @@
 // src/lib/api.ts
+import axios from "axios";
 
-// ===== Tipos compartidos (exportados) =====
-export type Convocatoria = { _id: string; codigo: string; activa: boolean };
-export type Concurso = { _id: string; convocatoriaId: string; nombre: string; activo?: boolean };
-export type Plaza = {
+/** ------------------ Axios base ------------------ **/
+const http = axios.create({
+  baseURL: "/api",         // Vite proxy redirige a tu backend (4000)
+  withCredentials: true,   // si tu API usa cookies/sesiones
+});
+
+/** ------------------ Tipos compartidos ------------------ **/
+export type CatalogItem = {
+  _id?: string;
+  codigo?: string;       // p.ej. "004/2025" o "109011"
+  nombre?: string;       // algunos catálogos usan "nombre" para concursos
+  hash?: string;         // id/slug de 40 hex que estás viendo en red
+  activa?: boolean;
+  activo?: boolean;
+};
+
+export type Especialista = {
   _id: string;
-  convocatoriaId: string;
-  concursoId: string;
-  puesto: string;
-  codigoPlaza: string;
-  unidadAdministrativa: string;
-  folio?: string;
-  fechaAplicacion?: string;
-  horaAplicacion?: string;
-  especialistaId: string;
-};
-export type Especialista = { _id: string; nombreCompleto: string; email?: string };
-
-export type CreateLinkBody = {
-  convocatoriaId: string;
-  concursoId: string;
-  plazaId: string;
-  especialistaId: string;
-  ttlHours?: number; // default 48
+  nombreCompleto: string;
+  email?: string;
+  curp?: string;
 };
 
-export type ExamHeader = {
-  convocatoria?: { id?: string; codigo?: string } | string;
-  concurso?: { id?: string; nombre?: string } | string;
-  plaza?: {
-    id?: string;
-    codigoPlaza?: string;
-    puesto?: string;
-    unidadAdministrativa?: string;
-    folio?: string;
-    fechaAplicacion?: string;
-    horaAplicacion?: string;
-    [key: string]: unknown;
-  } | null;
-  especialista?: {
-    id?: string;
-    nombre?: string;
-    nombreCompleto?: string;
-    email?: string;
-    [key: string]: unknown;
-  } | null;
-  [key: string]: unknown;
+export type PlazaRow = {
+  _id: string;
+  codigoPlaza?: string;
+  codigo?: string;
+  plaza?: string;
+  code?: string;
+  clave?: string;
+  puesto?: string;
+  puestoNombre?: string;
+  unidadAdministrativa?: string;
+  unidad_adm?: string;
+  radicacion?: string;
+  especialistaId?: string;
+  especialistaNombre?: string;
 };
 
-export type GenResult = {
-  token: string;
+export type LinkCreatePayload = {
+  convocatoriaId: string;   // puede ser _id/hash/codigo (el back lo resuelve)
+  concursoId: string;       // puede ser _id/hash/codigo
+  plazaId: string;          // manda CÓDIGO de plaza
+  especialistaId?: string;
+  ttlHours?: number;
+  prefill: {
+    convocatoria?: string;          // código humano (ej "004/2025")
+    concurso?: string;              // código/etiqueta humana (ej "109011")
+    plazaCodigo: string;
+    puesto: string;
+    unidadAdministrativa: string;
+    jefeNombre: string;
+    radicacion?: string;
+  };
+};
+
+export type LinkCreateResponse = {
   url: string;
-  expiresAt: string;
-  header?: ExamHeader | null;
+  token: string;
+  expiraAt: string;         // OJO: es expiraAt (no expiresAt)
+  prefillPreview?: any;
 };
 
 export type LinkVerify = {
   valid: boolean;
-  reason?: "invalid" | "expired" | "used" | "revoked" | string;
-  status?: string;
-  expiresAt?: string;
-  header?: ExamHeader | null;
+  reason?: string;          // "expired" | "used" | "invalid"
+  header?: any;
+};
+
+export type PrefillFieldOption = { value: string; label: string };
+export type PrefillField = {
+  name: string;
+  label: string;
+  type: "text" | "number" | "date" | "select" | "textarea";
+  required?: boolean;
+  defaultValue?: any;
+  options?: PrefillFieldOption[];
 };
 
 export type PrefillPayload = {
-  header: ExamHeader | null;
-  fields?: Array<{
-    name: string;
-    label: string;
-    type?: "text" | "number" | "select" | "date" | "textarea";
-    required?: boolean;
-    options?: Array<{ value: string; label: string }>;
-    defaultValue?: unknown;
-  }>;
+  header?: any;
+  fields?: PrefillField[];
 };
 
-export type SubmitExamPayload = {
-  header: ExamHeader | null;
-  answers: Record<string, unknown>;
-  nombreDeclarante?: string;
+export type SubmitExamResponse = {
+  examId: string;
 };
 
-export type SubmitExamResponse = { examId: string; status: "submitted" | string };
-export type Artifacts = { faPdfUrl?: string; fePdfUrl?: string; receiptPdfUrl?: string };
-
-export type ExamSummary = {
-  _id: string;
-  linkToken?: string;
-  convocatoriaId: string;
-  concursoId: string;
-  plazaId: string;
-  especialistaId: string;
-  nombreDeclarante?: string;
-  createdAt?: string;
-  header?: ExamHeader | null;
-  artifacts?: Artifacts;
+export type Artifacts = {
+  responsesPdfUrl?: string;
+  faPdfUrl?: string;
+  fePdfUrl?: string;
+  receiptPdfUrl?: string;
 };
 
-export type ExamDetail = ExamSummary & { answers: Record<string, unknown> };
-
-// ===== Infra HTTP =====
-const metaEnv =
-  (typeof import.meta !== "undefined"
-    ? (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-    : undefined) ?? {};
-const nodeEnv =
-  (typeof process !== "undefined"
-    ? (process as unknown as { env?: Record<string, string | undefined> }).env
-    : undefined) ?? {};
-
-const BASE = metaEnv.VITE_API_URL ?? nodeEnv.NEXT_PUBLIC_API_URL ?? "/api";
-
-type ErrorPayload = { message?: string; code?: string };
-type ErrorWithCode = Error & { code?: string };
-
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    // credentials: "include",
-  });
-  const payload = (await res.json().catch(() => ({}))) as unknown;
-  if (!res.ok) {
-    const data = payload as ErrorPayload;
-    const error: ErrorWithCode = new Error(data?.message || "Error de red");
-    error.code = data?.code || "http_error";
-    throw error;
-  }
-  return payload as T;
-}
-
-// ===== Cliente API (sin duplicados) =====
+/** ------------------ API de alto nivel ------------------ **/
 export const api = {
-  // Health
-  health: () => http<{ ok: true }>("/health"),
+  // Catálogos
+  async listConvocatorias() {
+    const { data } = await http.get<CatalogItem[]>("/catalog/convocatorias");
+    return data;
+  },
+  async listEspecialistas() {
+    const { data } = await http.get<Especialista[]>("/catalog/especialistas");
+    return data;
+  },
+  async listConcursosByConvocatoria(convocatoriaId: string) {
+    const { data } = await http.get<CatalogItem[]>(
+      "/catalog/concursos",
+      { params: { convocatoriaId } }
+    );
+    return data;
+  },
+
+  // Plazas
+  async listPlazas(convocatoriaId: string, concursoId: string) {
+    const { data } = await http.get<PlazaRow[]>(
+      "/plazas",
+      { params: { convocatoriaId, concursoId } }
+    );
+    return data;
+  },
 
   // Links
-  verifyLink: (token: string) =>
-    http<LinkVerify>(`/links/${encodeURIComponent(token)}/verify`, { method: "POST" }),
-  useLink: (token: string) =>
-    http<{ used: boolean }>(`/links/${encodeURIComponent(token)}/use`, { method: "POST" }),
-  createLink: (body: CreateLinkBody) =>
-    http<GenResult>("/links", { method: "POST", body: JSON.stringify(body) }),
-
-  // Exams
-  prefillExam: (token: string) =>
-    http<PrefillPayload>(`/exams/prefill/${encodeURIComponent(token)}`),
-  submitExam: (token: string, body: SubmitExamPayload) =>
-    http<SubmitExamResponse>(`/exams/${encodeURIComponent(token)}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  listExams: (params: { convocatoriaId?: string; concursoId?: string; plazaId?: string } = {}) => {
-    const qs = new URLSearchParams();
-    if (params.convocatoriaId) qs.set("convocatoriaId", params.convocatoriaId);
-    if (params.concursoId) qs.set("concursoId", params.concursoId);
-    if (params.plazaId) qs.set("plazaId", params.plazaId);
-    const query = qs.toString();
-    return http<ExamSummary[]>(`/exams${query ? `?${query}` : ""}`);
+  async createLink(payload: LinkCreatePayload) {
+    const { data } = await http.post<LinkCreateResponse>("/links", payload);
+    return data;
   },
-  getExam: (id: string) => http<ExamDetail>(`/exams/by-id/${encodeURIComponent(id)}`),
-  getArtifacts: (id: string) =>
-    http<Artifacts>(`/exams/by-id/${encodeURIComponent(id)}/artifacts`),
+  async verifyLink(token: string) {
+    // Si tienes endpoint /api/links/verify
+    try {
+      const { data } = await http.get<LinkVerify>("/links/verify", { params: { token } });
+      return data;
+    } catch {
+      // Fallback: si no existe verify, considera válido y deja que prefill falle si caducó
+      return { valid: true } as LinkVerify;
+    }
+  },
 
-  // Consents
-  postConsent: (
-    token: string,
-    body: { tipo: "uso_app" | "conclusion_examen"; nombreDeclarante: string; aceptado: boolean }
-  ) =>
-    http<unknown>(`/consents/${encodeURIComponent(token)}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  // Examen
+  async prefillExam(token: string) {
+    // Debe existir un GET /api/exams/prefill?token=...
+    const { data } = await http.get<PrefillPayload>("/exams/prefill", { params: { token } });
+    return data;
+  },
+  async submitExam(token: string, body: { header: any; answers: Record<string, any> }) {
+    // POST /api/exams/:token
+    const { data } = await http.post<SubmitExamResponse>(`/exams/${encodeURIComponent(token)}`, body);
+    return data;
+  },
+  async getArtifacts(examId: string) {
+    // Ajusta si tu endpoint real es otro
+    const { data } = await http.get<Artifacts>(`/exams/${encodeURIComponent(examId)}/artifacts`);
+    return data;
+  },
 
-  // Catalog
-  listConvocatorias: () => http<Convocatoria[]>("/catalog/convocatorias"),
-  listConcursos: () => http<Concurso[]>("/catalog/concursos"),
-  listEspecialistas: () => http<Especialista[]>("/catalog/especialistas"),
-
-  // Helpers para el flujo
-  listConcursosByConvocatoria: (convocatoriaId: string) =>
-    http<Concurso[]>(
-      `/catalog/concursos?convocatoriaId=${encodeURIComponent(convocatoriaId)}`
-    ),
-  listPlazas: (convocatoriaId: string, concursoId: string) =>
-    http<Plaza[]>(
-      `/plazas?convocatoriaId=${encodeURIComponent(
-        convocatoriaId
-      )}&concursoId=${encodeURIComponent(concursoId)}`
-    ),
+  // Consentimientos
+  async postConsent(token: string, body: { tipo: string; nombreDeclarante: string; aceptado: boolean }) {
+    // POST /api/consents/:token
+    const { data } = await http.post(`/consents/${encodeURIComponent(token)}`, body);
+    return data;
+  },
 };

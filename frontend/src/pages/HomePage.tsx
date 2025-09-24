@@ -1,4 +1,3 @@
-import CasePractices from "../features/casos-practicos/CasePractices";
 import LinkGenerator from "../features/links/LinkGenerator";
 export default function HomePage({
   consentName,
@@ -10,7 +9,6 @@ export default function HomePage({
   return (
     <main className="flex flex-col flex-1 justify-center items-center">
       <LinkGenerator />
-      <CasePractices />
 
       {/* FA / FE */}
       <div className="flex items-center space-x-2 text-sm text-gray-400 bg-cyan-900 rounded-full px-6 py-3 my-6">

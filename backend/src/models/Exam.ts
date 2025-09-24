@@ -9,15 +9,11 @@ const ExamSchema = new Schema({
 
   header:   { type: Schema.Types.Mixed },
   answers:  { type: Schema.Types.Mixed },
-  nombreDeclarante: { type: String },
 
   artifacts: {
-    responsesPdf:   { type: String }, // URL o path (compatibilidad)
-    faPdf:          { type: String },
-    fePdf:          { type: String },
-    receiptPdfUrl:  { type: String },
-    faPdfUrl:       { type: String },
-    fePdfUrl:       { type: String },
+    responsesPdf: { type: String }, // URL o path
+    faPdf:        { type: String },
+    fePdf:        { type: String },
   }
 }, { timestamps: true });
 

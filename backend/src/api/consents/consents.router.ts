@@ -1,7 +1,7 @@
 // src/api/consents/consents.router.ts
 import { Router } from 'express';
 import { consentBodySchema } from '../../schemas/consent.schema';
-import { isValidHexToken } from '../../shared/token';
+import { isValidHexToken, sha256Hex } from '../../shared/token';
 import Link from '../../models/Link';
 import Consent from '../../models/Consent';
 import { ipLimiter, tokenLimiter } from '../../middleware/rateLimiters';
@@ -14,7 +14,7 @@ const router = Router();
  * - Valida token de 48 hex
  * - Valida cuerpo con Zod
  * - Rechaza si aceptado=false (400)
- * - Busca el Link por token (sin exponerlo en logs)
+ * - Busca Link por tokenHash (sin exponer tokenHash)
  * - Rechaza 404 invalid_token / 400 expired_token / 400 used (si aplica)
  * - Idempotente por (linkId, tipo): si ya existe => 201 con id
  * - Crea consent y responde 201
@@ -38,25 +38,19 @@ router.post('/:token', ipLimiter, tokenLimiter, async (req, res, next) => {
       return res.status(400).json({ code: 'consent_not_accepted', message: 'Debe aceptar el aviso de privacidad' });
     }
 
-    const link = await Link.findOne({ token }).lean();
+    // No exponemos tokenHash; solo lo usamos para resolver el Link
+    const tokenHash = sha256Hex(token);
+    const link = await Link.findOne({ tokenHash }).lean();
     if (!link) {
       return res.status(404).json({ code: 'invalid_token' });
     }
 
     // Verificamos estado del link (expirado o usado) => 400
     const now = new Date();
-    const expiresAt = link.expiresAt instanceof Date ? link.expiresAt : new Date(link.expiresAt);
-    if (expiresAt && expiresAt.getTime() < now.getTime()) {
-      return res.status(400).json({ code: 'expired_token' });
-    }
-    const status = String(link.status || 'ISSUED').toUpperCase();
-    if (status === 'USED') {
+    if (link.usado) {
       return res.status(400).json({ code: 'used' });
     }
-    if (status === 'REVOKED') {
-      return res.status(400).json({ code: 'revoked' });
-    }
-    if (status === 'EXPIRED') {
+    if (link.expiraAt && new Date(link.expiraAt) < now) {
       return res.status(400).json({ code: 'expired_token' });
     }
 
@@ -91,4 +85,4 @@ export default router;
 //404 invalid_token cuando el token no cumple formato o no existe en BD
 //400 expired_token/used cuando el link ya no es válido para operar.
 //Idempotencia: si el consentimiento ya existe, devolvemos 201 con el id (evita doble posteo).
-//Logs mínimos: linkId y tipo únicamente (sin exponer token y limitando PII).
+//Logs mínimos: linkId y tipo únicamente (cumple "no exponer token/tokenHash y limitar PII").

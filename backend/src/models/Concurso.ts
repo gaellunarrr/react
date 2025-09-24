@@ -1,19 +1,28 @@
-import { Schema, Types, model } from 'mongoose';
+import { Schema, model } from "mongoose";
 
 const ConcursoSchema = new Schema(
   {
-    convocatoriaId: { type: Types.ObjectId, ref: 'Convocatoria', required: true, index: true },
-    nombre: { type: String, required: true, trim: true },
-    activo: { type: Boolean, default: true }
+    // También hash-40 en tu BD
+    _id: { type: String, required: true },
+
+    // FK a convocatoria puede venir como string hash-40 u OID -> Mixed
+    convocatoriaId: { type: Schema.Types.Mixed },
+    convocatoria_id: { type: Schema.Types.Mixed },
+
+    // En tus datos, el “código” del concurso aparece como número y/o string
+    codigo: { type: Schema.Types.Mixed },   // 124002 o "124002"
+    concurso: { type: Schema.Types.Mixed }, // 124002 o "124002"
+
+    nombre: { type: String },
+    descripcion: { type: String },
+    hash: { type: String },
+    code: { type: String },
   },
-  { timestamps: true }
+  {
+    versionKey: false,
+    strict: false,
+    timestamps: false,
+  }
 );
 
-export type Concurso = {
-  _id: string;
-  convocatoriaId: string;
-  nombre: string;
-  activo: boolean;
-};
-
-export default model<Concurso>('Concurso', ConcursoSchema);
+export default model("Concurso", ConcursoSchema);

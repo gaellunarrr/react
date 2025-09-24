@@ -5,7 +5,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { apiRouter } from './api';
 import { config } from './shared/config';
-
+import debugPlazaRouter from './api/plazas/plazas.router';
 const app = express();
 
 app.use(helmet());
@@ -16,7 +16,7 @@ app.use(
   })
 );
 
-// Opcional: evita ETag/304 en dev
+// Evita ETag/304 en dev
 app.set('etag', false);
 
 app.use(express.json({ limit: '1mb' }));
@@ -50,6 +50,7 @@ app.use(
   }
 );
 
+app.use("/api/_debug", debugPlazaRouter);
 // Manejo centralizado de errores (shape estable)
 app.use(
   (err: unknown, req: Request, res: Response, _next: NextFunction): void => {

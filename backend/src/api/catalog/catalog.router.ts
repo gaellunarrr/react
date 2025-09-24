@@ -100,7 +100,7 @@ router.get('/concursos', async (req: Request, res: Response, next: NextFunction)
     // Fallback para evitar opciones sin texto
     out.forEach(c => {
       if (!c.nombre || !String(c.nombre).trim()) {
-        c.nombre = `Concurso ${c._id.slice(-6)}`;
+        c.nombre =` Concurso ${c._id.slice(-6)}`;
       }
     });
 

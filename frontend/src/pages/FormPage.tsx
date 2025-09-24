@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import {
-  api,
-  type PrefillPayload,
-  type LinkVerify,
-  type SubmitExamResponse,
-  type Artifacts,
-  type ExamHeader,
-} from "../lib/api";
+import { api, type PrefillPayload, type LinkVerify, type SubmitExamResponse, type Artifacts } from "../lib/api";
+import FormCasePractices, { type EstructuraPayload } from "../features/casos-practicos/FormCasePractices";
 
-type FormState = Record<string, unknown>;
+type FormState = Record<string, any>;
 
 export default function FormPage() {
   const { token = "" } = useParams();
@@ -20,11 +14,20 @@ export default function FormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [result, setResult] = useState<SubmitExamResponse | null>(null);
+  const [result, setResult] = useState<{ examId: string } | null>(null);
   const [artifacts, setArtifacts] = useState<Artifacts | null>(null);
 
   // Para la copia con firma
   const [nombreDeclarante, setNombreDeclarante] = useState("");
+  
+  // Para los casos prácticos
+  const [casePracticesData, setCasePracticesData] = useState<EstructuraPayload | null>(null);
+  const [casePracticesValid, setCasePracticesValid] = useState(false);
+
+  const handleCasePracticesChange = (data: EstructuraPayload, isValid: boolean) => {
+    setCasePracticesData(data);
+    setCasePracticesValid(isValid);
+  };
 
   useEffect(() => {
     (async () => {
@@ -43,25 +46,24 @@ export default function FormPage() {
         setPrefill(p);
 
         // Inicializar form con defaults si existen
-        const defaults: Record<string, unknown> = {};
+        const defaults: Record<string, any> = {};
         p?.fields?.forEach((f) => {
           if (typeof f.defaultValue !== "undefined") defaults[f.name] = f.defaultValue;
           else if (f.type === "select" && f.options?.length) defaults[f.name] = f.options[0].value;
           else defaults[f.name] = "";
         });
         setForm(defaults);
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : "No se pudo cargar el formulario";
-        setError(message);
+      } catch (e: any) {
+        setError(e?.message || "No se pudo cargar el formulario");
       } finally {
         setLoading(false);
       }
     })();
   }, [token]);
 
-  const header = useMemo<ExamHeader | null>(() => prefill?.header ?? verif?.header ?? null, [prefill, verif]);
+  const header = useMemo(() => prefill?.header ?? verif?.header ?? null, [prefill, verif]);
 
-  const handleChange = (name: string, value: unknown) => {
+  const handleChange = (name: string, value: any) => {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -71,13 +73,9 @@ export default function FormPage() {
     setError(null);
     try {
       // 3) Enviar respuestas
-      const payload = {
-        header,
-        answers: form,
-        nombreDeclarante: nombreDeclarante?.trim() || undefined,
-      };
-      const resp = await api.submitExam(token, payload);
-      setResult(resp);
+      const payload = { header, answers: form };
+      const resp = await api.submitExam(token, payload) as SubmitExamResponse;
+      setResult({ examId: resp.examId });
 
       // 4) Si el back ya genera PDFs, los pedimos
       try {
@@ -100,9 +98,8 @@ export default function FormPage() {
           // no bloquea el flujo
         }
       }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "No se pudo enviar el formulario";
-      setError(message);
+    } catch (e: any) {
+      setError(e?.message || "No se pudo enviar el formulario");
     } finally {
       setSubmitting(false);
     }
@@ -178,6 +175,8 @@ export default function FormPage() {
         </div>
       )}
 
+      <FormCasePractices onChange={handleCasePracticesChange} />
+
       <FormFields
         fields={prefill?.fields}
         form={form}
@@ -216,8 +215,8 @@ function FormFields({
   onChange,
 }: {
   fields?: PrefillPayload["fields"];
-  form: Record<string, unknown>;
-  onChange: (name: string, value: unknown) => void;
+  form: Record<string, any>;
+  onChange: (name: string, value: any) => void;
 }) {
   if (!fields?.length) {
     // Respaldo: si aún no definimos campos en el prefill
@@ -237,13 +236,7 @@ function FormFields({
   return (
     <div className="grid grid-cols-1 gap-4">
       {fields.map((f) => {
-        const rawValue = form[f.name];
-        const stringValue =
-          typeof rawValue === "string"
-            ? rawValue
-            : typeof rawValue === "number"
-              ? String(rawValue)
-              : "";
+        const val = form[f.name] ?? "";
         switch (f.type) {
           case "number":
             return (
@@ -252,7 +245,7 @@ function FormFields({
                 <input
                   type="number"
                   className="w-full border rounded-xl px-3 py-2"
-                  value={stringValue}
+                  value={val}
                   onChange={(e) => onChange(f.name, Number(e.target.value))}
                   required={f.required}
                 />
@@ -265,7 +258,7 @@ function FormFields({
                 <input
                   type="date"
                   className="w-full border rounded-xl px-3 py-2"
-                  value={stringValue}
+                  value={val}
                   onChange={(e) => onChange(f.name, e.target.value)}
                   required={f.required}
                 />
@@ -277,7 +270,7 @@ function FormFields({
                 <label className="block text-sm text-gray-700 mb-1">{f.label}{f.required && " *"}</label>
                 <select
                   className="w-full border rounded-xl px-3 py-2"
-                  value={stringValue}
+                  value={val}
                   onChange={(e) => onChange(f.name, e.target.value)}
                   required={f.required}
                 >
@@ -293,7 +286,7 @@ function FormFields({
                 <label className="block text-sm text-gray-700 mb-1">{f.label}{f.required && " *"}</label>
                 <textarea
                   className="w-full border rounded-xl px-3 py-2 min-h-[120px]"
-                  value={stringValue}
+                  value={val}
                   onChange={(e) => onChange(f.name, e.target.value)}
                   required={f.required}
                 />
@@ -306,7 +299,7 @@ function FormFields({
                 <label className="block text-sm text-gray-700 mb-1">{f.label}{f.required && " *"}</label>
                 <input
                   className="w-full border rounded-xl px-3 py-2"
-                  value={stringValue}
+                  value={val}
                   onChange={(e) => onChange(f.name, e.target.value)}
                   required={f.required}
                 />
@@ -323,8 +316,8 @@ function ReceiptFallback({
   answers,
   nombreDeclarante,
 }: {
-  header: ExamHeader | null;
-  answers: Record<string, unknown>;
+  header: any;
+  answers: Record<string, any>;
   nombreDeclarante: string;
 }) {
   return (

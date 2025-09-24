@@ -1,29 +1,97 @@
+// src/features/links/LinkGenerator.tsx
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
 
-type Convocatoria = { _id: string; codigo: string; activa: boolean };
-type Concurso = { _id: string; convocatoriaId: string; nombre: string; activo?: boolean };
+/* ---------------------------- Tipos (flexibles) ---------------------------- */
 
-type Plaza = {
-  _id: string; // id interno de la plaza (puede ser ObjectId o hash)
-  convocatoriaId: string; // proviene del backend para referencia/visualización
-  concursoId: string;     // proviene del backend para referencia/visualización
-  // --- PUESTO DE LA PLAZA (vacante) ---
-  puesto: string;
-  // código de la plaza (lo usaremos para generar el link y que el backend la resuelva por código)
-  codigoPlaza: string;
-  // unidad administrativa de la plaza
-  unidadAdministrativa: string;
-  folio?: string;
-  fechaAplicacion?: string;
-  horaAplicacion?: string;
-  // referencia al especialista/jefe asignado a la plaza
-  especialistaId: string;
+type Convocatoria = {
+  _id: string;
+  codigo?: string;
+  nombre?: string;
+  activa?: boolean;
+  hash?: string;
 };
 
-type Especialista = { _id: string; nombreCompleto: string; email?: string };
+type Concurso = {
+  _id: string;
+  convocatoriaId?: string;
+  codigo?: string;
+  nombre?: string;
+  activo?: boolean;
+  hash?: string;
+};
 
-type GenResult = { token: string; url: string; expiresAt: string };
+type Plaza = {
+  _id: string;
+  convocatoriaId?: string;
+  concursoId?: string;
+
+  // alias posibles de código de plaza
+  codigoPlaza?: string;
+  codigo?: string;
+  plaza?: string;
+  code?: string;
+  clave?: string;
+
+  // puesto / unidad (alias)
+  puesto?: string;
+  puestoNombre?: string;
+  unidadAdministrativa?: string;
+  unidad_adm?: string;
+
+  radicacion?: string;
+
+  // especialista (alias según la fuente)
+  especialistaId?: string;     // camelCase (si viene normalizado)
+  especialista_id?: string;    // snake_case (como en tu BD)
+  especialistaNombre?: string; // opcional
+};
+
+type Especialista = {
+  _id: string;
+  nombreCompleto?: string;
+  nombre?: string;
+  email?: string;
+};
+
+type GenResult = { token: string; url: string; expiraAt: string };
+
+/* ------------------------------ Utilidades UI ----------------------------- */
+
+function getPlazaCodigo(p: Plaza) {
+  return p.codigoPlaza || p.codigo || p.plaza || p.code || p.clave || "";
+}
+
+function getPuesto(p: Plaza) {
+  return p.puesto || p.puestoNombre || "";
+}
+
+function getUnidad(p: Plaza) {
+  return p.unidadAdministrativa || (p as any).unidad_adm || "";
+}
+
+function getEspecialistaId(p: Plaza) {
+  return p.especialistaId || (p as any).especialista_id || "";
+}
+
+function getEspecialistaNombre(p: Plaza, map: Record<string, Especialista>) {
+  const id = getEspecialistaId(p);
+  return (
+    p.especialistaNombre ||
+    (id ? map[id]?.nombreCompleto || (map[id] as any)?.nombre : "") ||
+    ""
+  );
+}
+
+function labelConcurso(c: Concurso) {
+  return c.nombre || c.codigo || c.hash || "SIN-NOMBRE";
+}
+
+function labelConvocatoria(c: Convocatoria) {
+  return c.codigo || c.nombre || c.hash || "SIN-CODIGO";
+}
+
+/* --------------------------------- Componente -------------------------------- */
 
 export default function LinkGenerator() {
   const [convocatorias, setConvocatorias] = useState<Convocatoria[]>([]);
@@ -37,7 +105,9 @@ export default function LinkGenerator() {
   const [busy, setBusy] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<Record<string, GenResult>>({}); // plazaId -> result
+  const [results, setResults] = useState<Record<string, GenResult>>({}); // plaza._id -> result
+
+  /* ----------------------------- Carga catálogos ----------------------------- */
 
   useEffect(() => {
     (async () => {
@@ -46,13 +116,15 @@ export default function LinkGenerator() {
           api.listConvocatorias(),
           api.listEspecialistas(),
         ]);
-        setConvocatorias(conv);
-        setEspecialistas(esp);
+        setConvocatorias(conv as any);
+        setEspecialistas(esp as any);
       } catch (e: any) {
         setError(e?.message || "Error cargando catálogos.");
       }
     })();
   }, []);
+
+  /* ------------------------------ Cambio de conv ----------------------------- */
 
   useEffect(() => {
     (async () => {
@@ -62,12 +134,14 @@ export default function LinkGenerator() {
       if (!convId) return;
       try {
         const data = await api.listConcursosByConvocatoria(convId);
-        setConcursos(data);
+        setConcursos(data as any);
       } catch (e: any) {
         setError(e?.message || "Error cargando concursos.");
       }
     })();
   }, [convId]);
+
+  /* ------------------------------- Cambio de conc ---------------------------- */
 
   useEffect(() => {
     (async () => {
@@ -75,44 +149,73 @@ export default function LinkGenerator() {
       if (!convId || !concId) return;
       try {
         const data = await api.listPlazas(convId, concId);
-        setPlazas(data);
+        setPlazas(data as any);
       } catch (e: any) {
         setError(e?.message || "Error cargando plazas.");
       }
     })();
   }, [convId, concId]);
 
+  /* ------------------------- Índice de especialistas ------------------------- */
+
   const especialistasById = useMemo(() => {
     const map: Record<string, Especialista> = {};
-    for (const e of especialistas) map[e._id] = e;
+    for (const e of especialistas) {
+      if (e?._id) map[e._id] = e;
+    }
     return map;
   }, [especialistas]);
+
+  /* -------------------------------- Generar link ----------------------------- */
 
   const handleGenerate = async (plaza: Plaza) => {
     setError(null);
     setBusy(true);
     setBusyRow(plaza._id);
+
     try {
-      // Importante:
-      // - Enviamos los _id reales seleccionados en los combos (convId/concId)
-      // - Enviamos la plaza por su CODIGO (codigoPlaza) para que el backend la resuelva aunque el _id no sea ObjectId
-      const body = {
-        convocatoriaId: convId,                // _id real de la convocatoria (select)
-        concursoId: concId,                    // _id real del concurso (select)
-        plazaId: plaza.codigoPlaza,            // usar código de plaza para resolución robusta en el backend
-        especialistaId: plaza.especialistaId,  // el backend podrá resolverlo; si no, mostrará 400 específico
+      // Códigos humanos de los selects
+      const conv = convocatorias.find((c) => c._id === convId);
+      const conc = concursos.find((c) => c._id === concId);
+
+      const convCode = conv?.codigo || conv?.nombre || "";
+      const concCode = conc?.codigo || conc?.nombre || "";
+
+      const plazaCodigo = getPlazaCodigo(plaza);
+      const puesto = getPuesto(plaza);
+      const unidadAdministrativa = getUnidad(plaza);
+
+      // Tomar especialista real desde la plaza + catálogo
+      const especialistaId = getEspecialistaId(plaza);
+      const jefeNombre = getEspecialistaNombre(plaza, especialistasById);
+
+      if (!convId || !concId || !plazaCodigo) {
+        setError("Faltan datos mínimos (convocatoria, concurso o código de plaza).");
+        return;
+      }
+
+      const body: any = {
+        convocatoriaId: convId, // _id/hash del select (tal como viene del catálogo)
+        concursoId: concId,     // _id/hash del select
+        plazaId: plazaCodigo,   // código robusto de la plaza
         ttlHours: 48,
         prefill: {
-            plazaCodigo: plaza.codigoPlaza,
-            puesto: plaza.puesto,
-            unidadAdministrativa: plaza.unidadAdministrativa,
-            jefeNombre: especialistasById[plaza.especialistaId]?.nombreCompleto || "",
-        }
+          convocatoria: convCode,
+          concurso: concCode,
+          plazaCodigo,
+          puesto,
+          unidadAdministrativa,
+          jefeNombre,
+          radicacion: (plaza as any).radicacion || "",
+        },
       };
-      const res = (await api.createLink(body)) as GenResult;
+
+      // No enviamos especialistaId, el backend creará el especialista con el jefeNombre
+      // que está incluido en el prefill
+
+      const res = await api.createLink(body);
       setResults((prev) => ({ ...prev, [plaza._id]: res }));
     } catch (e: any) {
-      // Intenta extraer mensaje del servidor si existe
       const serverMsg =
         e?.response?.data?.message ||
         e?.data?.message ||
@@ -134,6 +237,8 @@ export default function LinkGenerator() {
     }
   };
 
+  /* ------------------------------------ UI ----------------------------------- */
+
   return (
     <section className="w-full max-w-5xl bg-white rounded-3xl shadow-lg p-6 my-10 text-left">
       <h2 className="text-2xl font-bold mb-1">Generación de links por Jefe de Plaza</h2>
@@ -151,7 +256,9 @@ export default function LinkGenerator() {
           >
             <option value="">— Seleccionar —</option>
             {convocatorias.map((c) => (
-              <option key={c._id} value={c._id}>{c.codigo}</option>
+              <option key={c._id} value={c._id}>
+                {labelConvocatoria(c)}
+              </option>
             ))}
           </select>
         </div>
@@ -166,7 +273,9 @@ export default function LinkGenerator() {
           >
             <option value="">— Seleccionar —</option>
             {concursos.map((c) => (
-              <option key={c._id} value={c._id}>{c.nombre}</option>
+              <option key={c._id} value={c._id}>
+                {labelConcurso(c)}
+              </option>
             ))}
           </select>
         </div>
@@ -204,16 +313,21 @@ export default function LinkGenerator() {
                   </td>
                 </tr>
               )}
+
               {plazas.map((p) => {
-                const esp = especialistasById[p.especialistaId];
+                const codigo = getPlazaCodigo(p);
+                const puesto = getPuesto(p);
+                const unidad = getUnidad(p);
+                const espName = getEspecialistaNombre(p, especialistasById) || "—";
+
                 const result = results[p._id];
+
                 return (
                   <tr key={p._id} className="border-t">
-                    <td className="px-3 py-2 font-mono">{p.codigoPlaza}</td>
-                    {/* PUESTO DE LA PLAZA (vacante) */}
-                    <td className="px-3 py-2">{p.puesto || "—"}</td>
-                    <td className="px-3 py-2">{p.unidadAdministrativa || "—"}</td>
-                    <td className="px-3 py-2">{esp?.nombreCompleto || p.especialistaId || "—"}</td>
+                    <td className="px-3 py-2 font-mono">{codigo || "—"}</td>
+                    <td className="px-3 py-2">{puesto || "—"}</td>
+                    <td className="px-3 py-2">{unidad || "—"}</td>
+                    <td className="px-3 py-2">{espName}</td>
                     <td className="px-3 py-2">
                       <button
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm disabled:opacity-50"
