@@ -57,25 +57,23 @@ export default function CasePractices() {
         id="cp-form"
         className={`grid overflow-hidden transition-all duration-300 ${openForm ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
       >
-        <div className="min-h-0">
-          {openForm && (
-            <FormCasePractices onChange={handleFormChange} />
-          )}
-        </div>
+      <div className="min-h-0">
+        {openForm && (
+          <FormCasePractices onChange={handleFormChange} />
+        )}
       </div>
-
-      <div className="flex justify-center items-center my-8">
+    </div><div className="flex justify-center items-center my-8">
         <button
           onClick={handleDownloadPDF}
           disabled={!isValid || downloading}
           className={`flex items-center gap-2 px-8 py-4 rounded-3xl shadow-lg transition-all text-lg border
             ${isValid ? "bg-white hover:bg-cyan-100 text-cyan-800 border-cyan-300"
-                      : "bg-gray-200 text-gray-500 border-gray-300 cursor-not-allowed"}`}
+              : "bg-gray-200 text-gray-500 border-gray-300 cursor-not-allowed"}`}
           aria-disabled={!isValid}
           title={isValid ? "Descargar PDF" : "Completa el formulario para habilitar la descarga"}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
           </svg>
           {downloading ? "Generando..." : "PDF"}
         </button>

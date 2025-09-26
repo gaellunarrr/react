@@ -81,16 +81,8 @@ export type PrefillField = {
 };
 
 export type PrefillPayload = {
-  plazaId: string;
-  prefill: {
-    convocatoria?: string;
-    concurso?: string;
-    plazaCodigo?: string;
-    puesto?: string;
-    unidadAdministrativa?: string;
-    jefeNombre?: string;
-    radicacion?: string;
-  };
+  header?: any;
+  fields?: PrefillField[];
 };
 
 export type SubmitExamResponse = {

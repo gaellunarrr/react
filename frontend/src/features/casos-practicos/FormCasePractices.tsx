@@ -32,6 +32,16 @@ export type EstructuraPayload = Encabezado & {
 /** Constantes */
 const STORAGE_KEY = "inegi_cp_form_v2";
 
+/** 🔒 Campos inmutables en el front */
+const LOCKED_KEYS = new Set<keyof Encabezado>([
+  "convocatoria",
+  "unidadAdministrativa",
+  "concurso",
+  "puesto",
+  "codigoPuesto",
+  "nombreEspecialista",
+]);
+
 const emptyHeader = (): Encabezado => ({
   convocatoria: "",
   unidadAdministrativa: "",
@@ -102,8 +112,10 @@ function migrateIfNeeded(raw: any): EstructuraPayload | null {
 /** Componente principal */
 export default function FormCasePractices({
   onChange,
+  initialData,
 }: {
   onChange: (data: EstructuraPayload, isValid: boolean) => void;
+  initialData?: Partial<Encabezado>;
 }) {
   // Carga inicial desde localStorage (lazy initializer)
   const [data, setData] = useState<EstructuraPayload>(() => {
@@ -112,15 +124,44 @@ export default function FormCasePractices({
       if (saved) {
         const parsed = JSON.parse(saved);
         const migrated = migrateIfNeeded(parsed);
-        if (migrated) return migrated;
+        if (migrated) {
+          // Si hay initialData, fusionarlo con los datos guardados
+          if (initialData) {
+            const updatedHeader = { ...migrated, ...initialData };
+            const updatedCasos = migrated.casos.map((caso, index) => ({
+              ...caso,
+              encabezado: index === 0 ? { ...caso.encabezado, ...initialData } : caso.encabezado
+            }));
+            return { ...updatedHeader, casos: updatedCasos };
+          }
+          return migrated;
+        }
       }
     } catch {}
+
+    // Si no hay datos guardados, crear con initialData si está disponible
     const first = emptyCase();
-    return { ...first.encabezado, casos: [first] };
+    const headerWithInitial = initialData ? { ...first.encabezado, ...initialData } : first.encabezado;
+    const caseWithInitial = { ...first, encabezado: headerWithInitial };
+    return { ...headerWithInitial, casos: [caseWithInitial] };
   });
 
   // Pestaña activa (1..N)
   const [activeIndex, setActiveIndex] = useState(0);
+
+  // Actualizar datos cuando cambien los initialData
+  useEffect(() => {
+    if (initialData) {
+      setData(prevData => {
+        const updatedHeader = { ...prevData, ...initialData };
+        const updatedCasos = prevData.casos.map((caso, index) => ({
+          ...caso,
+          encabezado: index === 0 ? { ...caso.encabezado, ...initialData } : caso.encabezado
+        }));
+        return { ...updatedHeader, casos: updatedCasos };
+      });
+    }
+  }, [initialData]);
 
   // Persistencia automática
   useEffect(() => {
@@ -130,13 +171,16 @@ export default function FormCasePractices({
   /** Helpers para editar */
   const setHeader = <K extends keyof Encabezado>(i: number, k: K, v: Encabezado[K]) =>
     setData((d) => {
+      // ⛔ Ignora cambios a campos bloqueados
+      if (LOCKED_KEYS.has(k)) return d;
+
       const casos = d.casos.map((c, idx) =>
         idx === i ? { ...c, encabezado: { ...c.encabezado, [k]: v } } : c
       );
       // espejo raíz si editan el encabezado del Caso 1
       let root = { ...d };
       if (i === 0) {
-        root = { ...root, [k]: v } as EstructuraPayload;
+        (root as any)[k] = v;
       }
       return { ...root, casos };
     });
@@ -198,10 +242,7 @@ export default function FormCasePractices({
       if (d.casos.length <= 1) return d; // siempre queda al menos 1
       const casos = d.casos.slice();
       casos.splice(i, 1);
-      // si borramos el caso activo, ajusta pestaña
-      const nextActive = Math.max(0, Math.min(activeIndex, casos.length - 1));
-      setActiveIndex(nextActive);
-      // espejo raíz (por si borra el caso 0 y el nuevo primero tiene encabezado diferente)
+      // espejo raíz (por si borramos el caso 0 y el nuevo primero tiene encabezado diferente)
       const h = casos[0].encabezado;
       return { ...h, casos };
     });
@@ -209,9 +250,17 @@ export default function FormCasePractices({
   const copyHeaderFromCase1 = (i: number) =>
     setData((d) => {
       const c1 = d.casos[0]?.encabezado ?? emptyHeader();
-      const casos = d.casos.map((c, idx) =>
-        idx === i ? { ...c, encabezado: { ...c1 } } : c
-      );
+      const casos = d.casos.map((c, idx) => {
+        if (idx !== i) return c;
+        // ⚠️ Copia desde el Caso 1 solo campos NO bloqueados
+        const nextEnc: Encabezado = { ...c.encabezado };
+        (Object.keys(c1) as (keyof Encabezado)[]).forEach((k) => {
+          if (!LOCKED_KEYS.has(k)) {
+            (nextEnc as any)[k] = (c1 as any)[k];
+          }
+        });
+        return { ...c, encabezado: nextEnc };
+      });
       return { ...d, casos };
     });
 
@@ -223,7 +272,7 @@ export default function FormCasePractices({
     const h = c.encabezado;
     const reqText = [
       h.modalidad, h.convocatoria, h.unidadAdministrativa, h.concurso, h.puesto,
-      h.codigoPuesto, h.nombreEspecialista, h.puestoEspecialista, h.fechaElaboracion,
+      h.codigoPuesto, h.nombreEspecialista,  h.fechaElaboracion,
       c.temasGuia, c.planteamiento,
     ].every((v) => !!v && String(v).trim().length > 0);
     const reqDur =
@@ -291,25 +340,70 @@ export default function FormCasePractices({
 
       {/* Encabezado del caso activo */}
       <div className="grid md:grid-cols-3 gap-4">
-        <TextField label="Convocatoria *" value={c.encabezado.convocatoria} onChange={(v) => setHeader(activeIndex, "convocatoria", v)} />
-        <TextField label="Unidad Administrativa *" value={c.encabezado.unidadAdministrativa} onChange={(v) => setHeader(activeIndex, "unidadAdministrativa", v)} />
-        <TextField label="Concurso *" value={c.encabezado.concurso} onChange={(v) => setHeader(activeIndex, "concurso", v)} />
-        <TextField label="Puesto *" value={c.encabezado.puesto} onChange={(v) => setHeader(activeIndex, "puesto", v)} />
-        <TextField label="Código *" value={c.encabezado.codigoPuesto} onChange={(v) => setHeader(activeIndex, "codigoPuesto", v)} />
+        <TextField
+          label="Convocatoria *"
+          value={c.encabezado.convocatoria}
+          onChange={(v) => setHeader(activeIndex, "convocatoria", v)}
+          disabled
+        />
+        <TextField
+          label="Unidad Administrativa *"
+          value={c.encabezado.unidadAdministrativa}
+          onChange={(v) => setHeader(activeIndex, "unidadAdministrativa", v)}
+          disabled
+        />
+        <TextField
+          label="Concurso *"
+          value={c.encabezado.concurso}
+          onChange={(v) => setHeader(activeIndex, "concurso", v)}
+          disabled
+        />
+        <TextField
+          label="Puesto *"
+          value={c.encabezado.puesto}
+          onChange={(v) => setHeader(activeIndex, "puesto", v)}
+          disabled
+        />
+        <TextField
+          label="Código *"
+          value={c.encabezado.codigoPuesto}
+          onChange={(v) => setHeader(activeIndex, "codigoPuesto", v)}
+          disabled
+        />
         <SelectField
           label="Modalidad *"
           value={c.encabezado.modalidad}
           onChange={(v) => setHeader(activeIndex, "modalidad", v)}
           options={["Oral", "Escrita"]}
         />
-        <MinutesField
-          label="Duración (min) *"
+      </div>
+      <div className="grid md:grid-cols-3 gap-4">
+
+        <TextField
+          label="Nombre del especialista"
+          value={c.encabezado.nombreEspecialista}
+          onChange={(v) => setHeader(activeIndex, "nombreEspecialista", v)}
+          className="md:col-span-3"
+          disabled
+        
+        />
+
+        
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+
+        <MinutesField 
+          label="Duración (minutos)"
           valueMinutes={c.encabezado.duracionMin}
           onChange={(mins) => setHeader(activeIndex, "duracionMin", mins)}
         />
-        <TextField label="Nombre de la persona especialista *" value={c.encabezado.nombreEspecialista} onChange={(v) => setHeader(activeIndex, "nombreEspecialista", v)} className="md:col-span-2" />
-        <TextField label="Puesto de la persona especialista *" value={c.encabezado.puestoEspecialista} onChange={(v) => setHeader(activeIndex, "puestoEspecialista", v)} />
-        <DateField label="Fecha de elaboración *" value={c.encabezado.fechaElaboracion} onChange={(v) => setHeader(activeIndex, "fechaElaboracion", v)} />
+        <DateField
+          label="Fecha de elaboración *"
+          value={c.encabezado.fechaElaboracion}
+          onChange={(v) => setHeader(activeIndex, "fechaElaboracion", v)}
+          
+        />
+
       </div>
 
       {/* Botón para re-clonar encabezado del Caso 1 */}
@@ -327,9 +421,22 @@ export default function FormCasePractices({
       )}
 
       {/* Secciones I - III */}
-      <AreaField label="I. Temas de la guía de estudio *" value={c.temasGuia} onChange={(v) => setCaseField(activeIndex, "temasGuia", v)} hint="Copie aquí los temas de la guía en que se basa el planteamiento." />
-      <AreaField label="II. Planteamiento del caso práctico *" value={c.planteamiento} onChange={(v) => setCaseField(activeIndex, "planteamiento", v)} />
-      <AreaField label="III. Equipo adicional requerido" value={c.equipoAdicional} onChange={(v) => setCaseField(activeIndex, "equipoAdicional", v)} />
+      <AreaField
+        label="I. Temas de la guía de estudio *"
+        value={c.temasGuia}
+        onChange={(v) => setCaseField(activeIndex, "temasGuia", v)}
+        hint="Copie aquí los temas de la guía en que se basa el planteamiento."
+      />
+      <AreaField
+        label="II. Planteamiento del caso práctico *"
+        value={c.planteamiento}
+        onChange={(v) => setCaseField(activeIndex, "planteamiento", v)}
+      />
+      <AreaField
+        label="III. Equipo adicional requerido"
+        value={c.equipoAdicional}
+        onChange={(v) => setCaseField(activeIndex, "equipoAdicional", v)}
+      />
 
       {/* IV. Aspectos por caso */}
       <fieldset className="border border-cyan-300 rounded-2xl p-4 space-y-4">
@@ -397,23 +504,39 @@ export default function FormCasePractices({
 
 /* ------- Inputs base ------- */
 function TextField({
-  label, value, onChange, className = ""
-}: { label: string; value: string; onChange: (v: string) => void; className?: string; }) {
+  label, value, onChange, className = "", disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+  disabled?: boolean;
+}) {
   return (
     <label className={`flex flex-col ${className}`}>
       <span className="text-sm text-cyan-900 mb-1">{label}</span>
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-xl border border-cyan-300 bg-white/80 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        onChange={(e) => !disabled && onChange(e.target.value)}
+        disabled={disabled}
+        className={`rounded-xl border border-cyan-300 px-3 py-2 text-center focus:outline-none focus:ring-2
+          ${disabled ? "bg-gray-100 text-gray-600 cursor-not-allowed pointer-events-none"
+                     : "bg-white/80 focus:ring-cyan-500"}`}
       />
     </label>
   );
 }
 
 function NumberField({
-  label, value, onChange, min, max
-}: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; }) {
+  label, value, onChange, min, max, disabled = false
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min?: number;
+  max?: number;
+  disabled?: boolean;
+}) {
   return (
     <label className="flex flex-col">
       <span className="text-sm text-cyan-900 mb-1">{label}</span>
@@ -421,39 +544,59 @@ function NumberField({
         type="number"
         value={Number.isFinite(value) ? value : ""}
         min={min} max={max}
-        onChange={(e) => onChange(e.target.value === "" ? NaN : Number(e.target.value))}
-        className="rounded-xl border border-cyan-300 bg-white/80 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        onChange={(e) => !disabled && onChange(e.target.value === "" ? NaN : Number(e.target.value))}
+        disabled={disabled}
+        className={`rounded-xl border border-cyan-300 px-3 py-2 text-center focus:outline-none focus:ring-2
+          ${disabled ? "bg-gray-100 text-gray-600 cursor-not-allowed pointer-events-none"
+                     : "bg-white/80 focus:ring-cyan-500"}`}
       />
     </label>
   );
 }
 
 function DateField({
-  label, value, onChange
-}: { label: string; value: string; onChange: (v: string) => void; }) {
+  label, value, onChange, disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
   return (
     <label className="flex flex-col">
       <span className="text-sm text-cyan-900 mb-1">{label}</span>
       <input
         type="date"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-xl border border-cyan-300 bg-white/80 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        onChange={(e) => !disabled && onChange(e.target.value)}
+        disabled={disabled}
+        className={`rounded-xl border border-cyan-300 px-3 py-2 text-center focus:outline-none focus:ring-2
+          ${disabled ? "bg-gray-100 text-gray-600 cursor-not-allowed pointer-events-none"
+                     : "bg-white/80 focus:ring-cyan-500"}`}
       />
     </label>
   );
 }
 
 function SelectField({
-  label, value, onChange, options
-}: { label: string; value: string; onChange: (v: string) => void; options: string[]; }) {
+  label, value, onChange, options, disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  disabled?: boolean;
+}) {
   return (
     <label className="flex flex-col">
       <span className="text-sm text-cyan-900 mb-1">{label}</span>
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-xl border border-cyan-300 bg-white/80 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        onChange={(e) => !disabled && onChange(e.target.value)}
+        disabled={disabled}
+        className={`rounded-xl border border-cyan-300 px-3 py-2 text-center focus:outline-none focus:ring-2
+          ${disabled ? "bg-gray-100 text-gray-600 cursor-not-allowed pointer-events-none"
+                     : "bg-white/80 focus:ring-cyan-500"}`}
       >
         <option value="">Selecciona…</option>
         {options.map((op) => <option key={op} value={op}>{op}</option>)}
@@ -463,16 +606,25 @@ function SelectField({
 }
 
 function AreaField({
-  label, value, onChange, hint
-}: { label: string; value: string; onChange: (v: string) => void; hint?: string; }) {
+  label, value, onChange, hint, disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  hint?: string;
+  disabled?: boolean;
+}) {
   return (
     <label className="flex flex-col">
       <span className="text-sm text-cyan-900 mb-1">{label}</span>
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => !disabled && onChange(e.target.value)}
         rows={4}
-        className="rounded-xl border border-cyan-300 bg-white/80 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        disabled={disabled}
+        className={`rounded-xl border border-cyan-300 px-3 py-2 text-center focus:outline-none focus:ring-2
+          ${disabled ? "bg-gray-100 text-gray-600 cursor-not-allowed pointer-events-none"
+                     : "bg-white/80 focus:ring-cyan-500"}`}
       />
       {hint && <span className="text-xs text-gray-600 mt-1">{hint}</span>}
     </label>
@@ -484,10 +636,12 @@ function MinutesField({
   label,
   valueMinutes,
   onChange,
+  disabled = false,
 }: {
   label: string;
   valueMinutes: number;
   onChange: (mins: number) => void;
+  disabled?: boolean;
 }) {
   const toHHMM = (mins: number) => {
     if (!Number.isFinite(mins) || mins <= 0) return "00:00";
@@ -508,12 +662,16 @@ function MinutesField({
         step={1}
         value={Number.isFinite(valueMinutes) ? valueMinutes : ""}
         onChange={(e) => {
+          if (disabled) return;
           const n = e.target.value === "" ? NaN : Number(e.target.value);
           if (!Number.isFinite(n)) return onChange(NaN);
           const clamped = Math.max(1, Math.min(120, Math.round(n)));
           onChange(clamped);
         }}
-        className="rounded-xl border border-cyan-300 bg-white/80 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        disabled={disabled}
+        className={`rounded-xl border border-cyan-300 px-3 py-2 text-center focus:outline-none focus:ring-2
+          ${disabled ? "bg-gray-100 text-gray-600 cursor-not-allowed pointer-events-none"
+                     : "bg-white/80 focus:ring-cyan-500"}`}
       />
       <span className="text-xs text-gray-600 mt-1">
         {Number.isFinite(valueMinutes) && valueMinutes > 0
